@@ -135,7 +135,12 @@ type ContainerConfig struct {
 }
 
 // LaunchContainer creates a docker container for a project, installs sketch and opens a connection to it.
-// It writes status to stdout.
+// LaunchContainer creates and runs a Docker container configured for the Sketch environment, handling image building, SSH setup, Git integration, environment variable forwarding, and runtime initialization.
+// 
+// It ensures Docker is available, verifies the Git repository, builds or finds the required Docker image and Sketch binary, sets up a local Git server, and configures the container with appropriate environment variables and mounts. The function copies necessary binaries and assets into the container, starts the container, retrieves mapped ports, and establishes SSH access if available. It posts initialization data to the container, optionally opens the Sketch UI in a browser, manages port tunneling, attaches to container output, and copies logs if configured. Cleanup is performed unless disabled by configuration.
+// 
+// @param config ContainerConfig specifying all parameters for the container launch.
+// @returns error if any step in the container setup or execution fails.
 func LaunchContainer(ctx context.Context, config ContainerConfig) error {
 	slog.Debug("Container Config", slog.String("config", fmt.Sprintf("%+v", config)))
 	if _, err := exec.LookPath("docker"); err != nil {
@@ -322,24 +327,25 @@ func LaunchContainer(ctx context.Context, config ContainerConfig) error {
 		return err
 	}
 
-	// Get the sketch server port from the container
-	localAddr, err := getContainerPort(ctx, cntrName, "80")
-	if err != nil {
-		return appendInternalErr(err)
-	}
+	    // Get the sketch server port from the container
+    localAddr, err := getContainerPort(ctx, cntrName, "80")
+    if err != nil {
+        return appendInternalErr(err)
+    }
 
-	if config.Verbose {
-		fmt.Fprintf(os.Stderr, "Host web server: http://%s/\n", localAddr)
-	}
+    if config.Verbose {
+        fmt.Fprintf(os.Stderr, "Host web server: http://%s/\n", localAddr)
+    }
 
-	localSSHAddr, err := getContainerPort(ctx, cntrName, "22")
-	if err != nil {
-		return appendInternalErr(err)
-	}
-	sshHost, sshPort, err := net.SplitHostPort(localSSHAddr)
-	if err != nil {
-		return appendInternalErr(fmt.Errorf("failed to split ssh host and port: %w", err))
-	}
+    localSSHAddr, err := getContainerPort(ctx, cntrName, "22")
+    if err != nil {
+        return appendInternalErr(err)
+    }
+    sshHost, sshPort, err := net.SplitHostPort(localSSHAddr)
+    if err != nil {
+        return appendInternalErr(fmt.Errorf("failed to split ssh host and port: %w", err))
+    }
+
 
 	var sshServerIdentity, sshUserIdentity, containerCAPublicKey, hostCertificate []byte
 
@@ -519,6 +525,9 @@ func newGitServer(gitRoot string) (*gitServer, error) {
 	return ret, nil
 }
 
+// createDockerContainer creates a Docker container with the specified configuration for running the Sketch environment.
+// It sets up port forwarding, environment variables, security options, volume mounts, and command-line arguments based on the provided ContainerConfig.
+// Returns an error if the container creation fails.
 func createDockerContainer(ctx context.Context, cntrName, hostPort, relPath, imgName string, config ContainerConfig) error {
 	cmdArgs := []string{
 		"create",
@@ -545,6 +554,7 @@ func createDockerContainer(ctx context.Context, cntrName, hostPort, relPath, img
 	} else {
 		cmdArgs = append(cmdArgs, "-p", "0:22") // use an ephemeral host port for ssh.
 	}
+
 	if relPath != "." {
 		cmdArgs = append(cmdArgs, "-w", "/app/"+relPath)
 	}

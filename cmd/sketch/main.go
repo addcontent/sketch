@@ -229,7 +229,7 @@ type CLIFlags struct {
 	mcpServers          StringSliceFlag
 }
 
-// parseCLIFlags parses all command-line flags and returns a CLIFlags struct
+// parseCLIFlags parses all command-line flags, including user-visible and internal/debugging options, and returns a populated CLIFlags struct reflecting the user's configuration and environment.
 func parseCLIFlags() CLIFlags {
 	var flags CLIFlags
 
@@ -255,7 +255,7 @@ func parseCLIFlags() CLIFlags {
 	userFlags.IntVar(&flags.sshPort, "ssh-port", 0, "the host port number that the container's ssh server will listen on, or a randomly chosen port if this value is 0")
 	userFlags.BoolVar(&flags.forceRebuild, "force-rebuild-container", false, "rebuild Docker container")
 
-	userFlags.StringVar(&flags.dockerArgs, "docker-args", "", "additional arguments to pass to the docker create command (e.g., --memory=2g --cpus=2)")
+	userFlags.StringVar(&flags.dockerArgs, "docker-args", "--cap-add=NET_ADMIN --cap-add=NET_RAW", "additional arguments to pass to the docker create command (e.g., --memory=2g --cpus=2)")
 	userFlags.Var(&flags.mounts, "mount", "volume to mount in the container in format /path/on/host:/path/in/container (can be repeated)")
 	userFlags.BoolVar(&flags.termUI, "termui", true, "enable terminal UI")
 	userFlags.StringVar(&flags.branchPrefix, "branch-prefix", "sketch/", "prefix for git branches created by sketch")
