@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"math/rand/v2"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -32,6 +33,8 @@ const (
 	TogetherAPIKeyEnv  = "TOGETHER_API_KEY"
 	GeminiAPIKeyEnv    = "GEMINI_API_KEY"
 	MistralAPIKeyEnv   = "MISTRAL_API_KEY"
+	AzureAPIKeyEnv     = "AZURE_OPENAI_KEY"
+	AzureEndpointEnv   = "AZURE_OPENAI_ENDPOINT"
 )
 
 type Model struct {
@@ -39,6 +42,7 @@ type Model struct {
 	ModelName        string // provided to the service provide to specify which model to use (e.g. "gpt-4.1-2025-04-14")
 	URL              string
 	APIKeyEnv        string // environment variable name for the API key
+	APIVersion       string // optional - API version for Azure models
 	IsReasoningModel bool   // whether this model is a reasoning model (e.g. O3, O4-mini)
 }
 
@@ -199,6 +203,19 @@ var (
 		URL:       MistralURL,
 		APIKeyEnv: MistralAPIKeyEnv,
 	}
+	AzureGPT4o = Model{
+		UserName:   "azure-gpt4o",
+		ModelName:  "your-gpt4o-deployment-name", // For Azure, this is the deployment name
+		APIKeyEnv:  AzureAPIKeyEnv,
+		APIVersion: "2024-02-15-preview",
+	}
+
+	AzureGPT35Turbo = Model{
+		UserName:   "azure-gpt35t",
+		ModelName:  "your-gpt35-turbo-deployment-name", // For Azure, this is the deployment name
+		APIKeyEnv:  AzureAPIKeyEnv,
+		APIVersion: "2024-02-15-preview",
+	}
 )
 
 // Service provides chat completions.
@@ -236,6 +253,8 @@ var ModelsRegistry = []Model{
 	FireworksLlama4Maverick,
 	MistralMedium,
 	DevstralSmall,
+	AzureGPT4o,
+	AzureGPT35Turbo,
 }
 
 // ListModels returns a list of all available models with their user-friendly names.
@@ -609,16 +628,31 @@ func (s *Service) Do(ctx context.Context, ir *llm.Request) (*llm.Response, error
 	model := cmp.Or(s.Model, DefaultModel)
 
 	// TODO: do this one during Service setup? maybe with a constructor instead?
-	config := openai.DefaultConfig(s.APIKey)
-	if model.URL != "" {
-		config.BaseURL = model.URL
+	var client *openai.Client
+	isAzure := strings.HasPrefix(model.UserName, "azure") || strings.Contains(model.URL, "azure.com")
+	if isAzure {
+		azureEndpoint := model.URL
+		if azureEndpoint == "" {
+			azureEndpoint = os.Getenv(AzureEndpointEnv)
+		}
+		if azureEndpoint == "" {
+			return nil, errors.New("azure endpoint not configured: set AZURE_OPENAI_ENDPOINT or URL in model definition")
+		}
+		config := openai.DefaultAzureConfig(s.APIKey, azureEndpoint)
+		config.HTTPClient = httpc
+		config.APIVersion = model.APIVersion
+		client = openai.NewClientWithConfig(config)
+	} else {
+		config := openai.DefaultConfig(s.APIKey)
+		if model.URL != "" {
+			config.BaseURL = model.URL
+		}
+		if s.Org != "" {
+			config.OrgID = s.Org
+		}
+		config.HTTPClient = httpc
+		client = openai.NewClientWithConfig(config)
 	}
-	if s.Org != "" {
-		config.OrgID = s.Org
-	}
-	config.HTTPClient = httpc
-
-	client := openai.NewClientWithConfig(config)
 
 	// Start with system messages if provided
 	var allMessages []openai.ChatCompletionMessage
