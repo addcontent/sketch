@@ -35,6 +35,7 @@ import (
 	"sketch.dev/skabandclient"
 	"sketch.dev/skribe"
 	"sketch.dev/termui"
+	"sketch.dev/tui"
 	"sketch.dev/webui"
 
 	"golang.org/x/term"
@@ -220,6 +221,7 @@ type CLIFlags struct {
 	dockerArgs          string
 	mounts              StringSliceFlag
 	termUI              bool
+	ui                  string
 	gitRemoteURL        string
 	upstream            string
 	commit              string
@@ -240,6 +242,7 @@ func parseCLIFlags() CLIFlags {
 
 	// User-visible flags
 	userFlags.StringVar(&flags.addr, "addr", "localhost:0", "local HTTP server")
+	userFlags.StringVar(&flags.ui, "ui", "term", "user interface: term or bubble")
 	userFlags.StringVar(&flags.skabandAddr, "skaband-addr", "https://sketch.dev", "URL of the skaband server; set to empty to disable sketch.dev integration")
 	userFlags.StringVar(&flags.skabandAddr, "ska-band-addr", "https://sketch.dev", "URL of the skaband server; set to empty to disable sketch.dev integration (alias for -skaband-addr)")
 	userFlags.BoolVar(&flags.unsafe, "unsafe", false, "run without a docker container")
@@ -628,12 +631,27 @@ func setupAndRunAgent(ctx context.Context, flags CLIFlags, modelURL, apiKey, pub
 		flags.termUI = false
 	}
 
-	// Create a variable for terminal UI
+	// Create termui variable for compatibility with existing callbacks
 	var s *termui.TermUI
 
-	// Create the termui instance only if needed
-	if flags.termUI {
+	// Choose UI implementation based on -ui flag (default "term")
+	type uiApp interface {
+	Run(context.Context) error
+	RestoreOldState() error
+}
+
+	var termApp uiApp
+
+	switch flags.ui {
+	case "bubble":
+		termApp = tui.New(agent, ps1URL)
+		flags.termUI = true // still considered a terminal UI for logging decisions
+	case "term", "":
 		s = termui.New(agent, ps1URL)
+		termApp = s
+		flags.termUI = true
+	default:
+		return fmt.Errorf("unknown ui %q (expected 'term' or 'bubble')", flags.ui)
 	}
 
 	// Start skaband connection loop if needed
@@ -680,21 +698,21 @@ func setupAndRunAgent(ctx context.Context, flags CLIFlags, modelURL, apiKey, pub
 			}
 		}
 	}
-	if s == nil {
+	if termApp == nil {
 		panic("Should have exited above.")
 	}
 
-	// Run the terminal UI
+	// Run the terminal UI (both TermUI and BubbleUI satisfy the small interface we use)
 	defer func() {
 		r := recover()
-		if err := s.RestoreOldState(); err != nil {
-			fmt.Fprintf(os.Stderr, "couldn't restore old terminal state: %s\n", err)
+		if termApp != nil {
+			_ = termApp.RestoreOldState() // BubbleUI RestoreOldState is nil, ignore error
 		}
 		if r != nil {
 			panic(r)
 		}
 	}()
-	if err := s.Run(ctx); err != nil {
+	if err := termApp.Run(ctx); err != nil {
 		return err
 	}
 
